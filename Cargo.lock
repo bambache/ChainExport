@@ -169,6 +169,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "chainexport"
+version = "0.1.0"
+dependencies = [
+ "rocket",
+ "rocket_dyn_templates",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2050,14 +2058,6 @@ name = "wasm-bindgen-shared"
 version = "0.2.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0237232789cf037d5480773fe568aac745bfe2afbc11a863e97901780a6b47cc"
-
-[[package]]
-name = "web-txs"
-version = "0.1.0"
-dependencies = [
- "rocket",
- "rocket_dyn_templates",
-]
 
 [[package]]
 name = "winapi"

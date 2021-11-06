@@ -1,13 +1,38 @@
-{% extends "base" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Chain Export</title>
+  <meta name="description" content="An application to export txs from configured chains.">
+  <meta name="author" content="Florin Balate">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-{% block content %}
-    <h1>Hi {{ name }}!</h1>
-    <h3>Here are your items:</h3>
-    <ul>
-        {% for s in items %}
-            <li>{{ s }}</li>
-        {% endfor %}
-    </ul>
-
-    <p>Try going to <a href="/tera/hello/Your%20Name">/tera/hello/Your Name</a></p>
-{% endblock content %}
+  <link href="//fonts.googleapis.com/css?family=Raleway:400,300,600" rel="stylesheet" type="text/css">
+  <link rel="stylesheet" href="/css/normalize.css">
+  <link rel="stylesheet" href="/css/skeleton.css">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="icon" type="image/ico" href="/images/favicon.ico">
+</head>
+<body>
+  <div class="container">
+    <div class="row">
+      <h4>Chain Export</h4>
+      <form action="/address" method="post">
+        <div class="ten columns">
+          <input type="text" placeholder="enter an address..."
+            name="address" id="address" value="" autofocus
+            class="u-full-width {% if flash %}field-{{flash.0}}{% endif %}" />
+          {% if flash %}
+            <small class="field-{{flash.0}}-msg">
+               {{ flash.1 }}
+            </small>
+          {% endif %}
+        </div>
+        <div class="two columns">
+          <input type="submit" value="search">
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
