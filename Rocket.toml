@@ -1,2 +1,7 @@
 [default]
 template_dir = "static"
+
+chains = [
+	{id = "ubiknetwork-1", api = "http://api:port", prefix = "ubik"},
+	{id = "cosmoshub-testnet", api = "http://api:port", prefix = "cosmos"},
+]
