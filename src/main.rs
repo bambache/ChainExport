@@ -8,6 +8,7 @@ use rocket::response::{Flash, Redirect};
 use rocket::fs::{FileServer, relative};
 use rocket::{State, fairing::AdHoc};
 use std::fmt::Write;
+use tendermint_rpc::{HttpClient,Client};
 
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
@@ -69,6 +70,20 @@ fn search(search_form: Form<Search>, config: &State<Chains>) -> Flash<Redirect> 
     }
 }
 
+#[get("/rpc")]
+async fn rpc() -> String {
+    let client = HttpClient::new("http://161.97.65.58:26657")
+        .unwrap();
+
+    let status = client.status()
+        .await
+        .unwrap();
+   
+    let mut result = String::new();
+    writeln!(result,"Status: {:?}", status).unwrap();
+    result
+}
+
 #[get("/chains")]
 fn chains(config: &State<Chains>) -> String {
     // config.chains.get(0).cloned().unwrap_or("default".into())
@@ -89,6 +104,6 @@ fn rocket() -> _ {
     rocket::build()
     .attach(Template::fairing())
     .mount("/", FileServer::from(relative!("static")))
-    .mount("/", routes![index, search, chains])
+    .mount("/", routes![index, search, chains, rpc])
     .attach(AdHoc::config::<Chains>())
 }
