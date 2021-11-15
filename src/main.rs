@@ -8,7 +8,8 @@ use rocket::response::{Flash, Redirect};
 use rocket::fs::{FileServer, relative};
 use rocket::{State, fairing::AdHoc};
 use std::fmt::Write;
-use tendermint_rpc::{HttpClient,Client};
+use tendermint_rpc::{HttpClient,Client, Order};
+use tendermint_rpc::query::Query;
 
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
@@ -72,15 +73,27 @@ fn search(search_form: Form<Search>, config: &State<Chains>) -> Flash<Redirect> 
 
 #[get("/rpc")]
 async fn rpc() -> String {
-    let client = HttpClient::new("http://161.97.65.58:26657")
+    let client = HttpClient::new("http://178.18.242.126:26657")
         .unwrap();
 
-    let status = client.status()
+    let mut result = String::new();
+
+    let query = Query::eq("transfer.sender", "ubik18dv926f68dtq32v54zrc5982q2wktgp5jevvft");
+    // no OR atm .or_eq("transfer.sender", "ubik18dv926f68dtq32v54zrc5982q2wktgp5jevvft");
+    // let query = Query::eq("tx.height", 1090159);
+    writeln!(result,"Show Query {:}", query.to_string()).unwrap();
+
+    let txs = client.tx_search(query,false,1,2,Order::Descending)
         .await
         .unwrap();
-   
-    let mut result = String::new();
-    writeln!(result,"Status: {:?}", status).unwrap();
+
+    writeln!(result,"Query: {:?}", txs.total_count).unwrap();
+
+    for tx in txs.txs.iter() {
+        writeln!(result,"Hash:\t{:?}", tx.hash).unwrap();
+        writeln!(result,"Height:\t{:?}", tx.height).unwrap();
+    }
+
     result
 }
 
