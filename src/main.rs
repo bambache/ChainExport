@@ -83,7 +83,7 @@ async fn rpc() -> String {
     // let query = Query::eq("tx.height", 1090159);
     writeln!(result,"Show Query {:}", query.to_string()).unwrap();
 
-    let txs = client.tx_search(query,false,1,2,Order::Descending)
+    let txs = client.tx_search(query,true,1,40,Order::Descending)
         .await
         .unwrap();
 
@@ -92,6 +92,19 @@ async fn rpc() -> String {
     for tx in txs.txs.iter() {
         writeln!(result,"Hash:\t{:?}", tx.hash).unwrap();
         writeln!(result,"Height:\t{:?}", tx.height).unwrap();
+        writeln!(result,"Gas (used / wanted):\t{:?} / {:?}"
+            , tx.tx_result.gas_used
+            , tx.tx_result.gas_wanted)
+                .unwrap();
+        let events = &tx.tx_result.events;
+        for ev in events.iter() {
+            if ev.type_str == "transfer" {
+                writeln!(result, "\tEv:\t{:?}", ev.type_str).unwrap();
+                for attr in ev.attributes.iter() {
+                    writeln!(result, "\t\t{:?}->{:?}", attr.key, attr.value).unwrap();
+                }
+            }
+        }
     }
 
     result
