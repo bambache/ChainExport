@@ -2,6 +2,6 @@
 template_dir = "static"
 
 chains = [
-	{id = "ubiknetwork-1", api = "http://178.18.242.126:26657", prefix = "ubik"},
-	{id = "cosmoshub-testnet", api = "http://api:port", prefix = "cosmos"},
+	{ id = "ubiknetwork-1", api = "http://178.18.242.126:26657", prefix = "ubik" },
+	{ id = "cosmoshub-testnet", api = "http://161.97.65.58:26657", prefix = "cosmos" },
 ]
