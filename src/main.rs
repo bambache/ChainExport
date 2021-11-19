@@ -11,16 +11,27 @@ use std::fmt::Write;
 use tendermint_rpc::{HttpClient,Client, Order};
 use tendermint_rpc::query::Query;
 
+
+#[derive(Debug, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct Tx {
+    hash: String,
+    height: u64
+}
+
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct Context {
     flash: Option<(String, String)>,
-    txs: Vec<String>
+    txs: Vec<Tx>
 }
 
 impl Context{
-    pub fn new(flash: Option<(String,String)>) -> Context {
+    pub fn err(flash: Option<(String,String)>) -> Context {
         Context {flash, txs: vec![]}
+    }
+    pub fn new(txs: Vec<Tx>) -> Context {
+        Context {flash: None, txs}
     }
 }
 
@@ -46,29 +57,60 @@ struct Chains {
 #[get("/")]
 fn index(flash: Option<FlashMessage<'_>>) -> Template {
     let flash = flash.map(FlashMessage::into_inner);
-    Template::render("index", Context::new(flash))
+    Template::render("index", Context::err(flash))
 }
 
-fn has_supported_prefix(address: &String, chains: &Vec<Chain>) -> bool {
+fn get_chain_matching_prefix<'a>(address: &'a String, chains: &'a Vec<Chain>) -> Option<&'a Chain> {
     for chain in chains.iter() {
         if address.starts_with(&chain.prefix) {
-            return true
+            return Some(chain);
         }
     }
-    false
+    None
 }
 
 #[post("/address", data = "<search_form>")]
-fn search(search_form: Form<Search>, config: &State<Chains>) -> Flash<Redirect> {
+async fn search(search_form: Form<Search>, config: &State<Chains>) -> Result<Template,Flash<Redirect>> {
     let address = search_form.into_inner().address;
     println!("<{0}>", address);
     if address.is_empty() {
-        Flash::error(Redirect::to("/"), "Address cannot be empty.")
-    } else if !has_supported_prefix(&address, &config.chains) {
-        Flash::error(Redirect::to("/"), "Address prefix is not supported.")
-    } else {
-        Flash::success(Redirect::to("/"), "Address searched successfully.")
+        return Err(Flash::error(Redirect::to("/"), "Address cannot be empty."));
     }
+
+    match get_chain_matching_prefix(&address, &config.chains) {
+        None => Err(Flash::error(Redirect::to("/"), "Address prefix is not supported.")),
+        Some(chain) => {
+        let v = list_txs_for_address(&address, chain).await;
+        Ok(Template::render("index", Context::new(v)))
+        }
+    }
+}
+
+async fn list_txs_for_address(address: &String, chain: &Chain) -> Vec<Tx> {
+    let client = HttpClient::new(&chain.api[0..])
+        .unwrap();
+
+    let mut result = Vec::new();
+    let query = Query::eq("transfer.sender", &address[0..]);
+
+    let txs = client.tx_search(query,true,1,40,Order::Descending)
+        .await
+        .unwrap();
+
+    for tx in txs.txs.iter() {
+        result.push(Tx{hash: tx.hash.to_string(), height: tx.height.value()});
+        // let events = &tx.tx_result.events;
+        // for ev in events.iter() {
+        //     if ev.type_str == "transfer" {
+        //         writeln!(result, "\tEv:\t{:?}", ev.type_str).unwrap();
+        //         for attr in ev.attributes.iter() {
+        //             writeln!(result, "\t\t{:?}->{:?}", attr.key, attr.value).unwrap();
+        //         }
+        //     }
+        // }
+    }
+    
+    result
 }
 
 #[get("/rpc")]
