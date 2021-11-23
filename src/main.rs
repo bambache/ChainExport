@@ -10,11 +10,16 @@ use rocket::request::FlashMessage;
 use rocket::response::{Flash, Redirect};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::{fairing::AdHoc, State};
+use rocket::fs::NamedFile;
 use rocket_dyn_templates::Template;
 
 use tendermint_rpc::error::Error;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order};
+
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+// use std::path::{PathBuf, Path};
 
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
@@ -27,15 +32,16 @@ struct Tx {
 #[serde(crate = "rocket::serde")]
 struct Context {
     flash: Option<(String, String)>,
+    address: Option<String>,
     txs: Vec<Tx>,
 }
 
 impl Context {
     pub fn err(flash: Option<(String, String)>) -> Context {
-        Context { flash, txs: vec![] }
+        Context { flash, address: None, txs: vec![] }
     }
-    pub fn new(txs: Vec<Tx>) -> Context {
-        Context { flash: None, txs }
+    pub fn new(address: Option<String>, txs: Vec<Tx>) -> Context {
+        Context { flash: None,address, txs }
     }
 }
 
@@ -90,10 +96,38 @@ async fn search(
             "Address prefix is not supported.",
         )),
         Some(chain) => match list_txs_for_address(&address, chain).await {
-            Ok(v) => Ok(Template::render("index", Context::new(v))),
+            Ok(v) => match write_to_file(&address, &v).await {
+                    Ok(_) => Ok(Template::render("index", Context::new(Some(address), v))),
+                    Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
+            },
             Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
         },
     }
+}
+
+#[post("/export", data = "<hidden_address>")]
+async fn export( hidden_address: Form<Search>) -> Option<NamedFile> {
+    let address = hidden_address.into_inner().address;
+    let file_name = format!("csv/{0}.csv",address);
+    NamedFile::open(file_name).await.ok()
+}
+
+
+async fn write_to_file(address: &String, txs: &Vec<Tx>) -> Result<(), std::io::Error> {
+    let file_name = format!("csv/{0}.csv",address);
+    let mut file = File::create(&file_name).await?;
+
+    let mut contents = String::new();
+    
+    writeln!(contents,"#{0}",address);
+    for tx in txs.iter() {
+            writeln!(contents,"{0},{1}", tx.hash, tx.height);
+    }
+
+    file.write_all(contents.as_bytes()).await?;
+    file.sync_all().await?;
+
+    Ok(())
 }
 
 async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>, Error> {
@@ -192,6 +226,6 @@ fn rocket() -> _ {
     rocket::build()
         .attach(Template::fairing())
         .mount("/", FileServer::from(relative!("static")))
-        .mount("/", routes![index, search, chains, rpc])
+        .mount("/", routes![index, search, export, chains, rpc])
         .attach(AdHoc::config::<Chains>())
 }

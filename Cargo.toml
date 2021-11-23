@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 rocket = "0.5.0-rc.1"
+tokio = "1.14.0"
 
 [dependencies.tendermint-rpc]
 version = "0.23.0"

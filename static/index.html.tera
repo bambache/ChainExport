@@ -21,7 +21,8 @@
       <h4>Chain Export</h4>
       <form action="/address" method="post">
         <div class="ten columns">
-          <input type="text" placeholder="enter an address..."
+          <input type="text"
+            placeholder={% if address %} "{{address}}" {% else %} "enter an address..." {%endif%}
             name="address" id="address" value="" autofocus
             class="u-full-width {% if flash %}field-{{flash.0}}{% endif %}" />
           {% if flash %}
@@ -35,6 +36,17 @@
         </div>
       </form>
     </div>
+
+    {% if txs %}
+    <div class="row">
+      <form action="/export" method="post">
+        <input type="hidden" name="address" value="{{address}}"/>
+        <div class="twelve columns">
+          <input type="submit" value="export to csv">
+        </div>
+      </form>
+    </div>
+    {% endif %}
     
     <div class="row">
       <div class="twelve columns">
