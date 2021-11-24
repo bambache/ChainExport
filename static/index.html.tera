@@ -53,8 +53,19 @@
         <table>
         {% for tx in txs %}
           <tr>
-            <td>{{ tx.hash }}</td>
+            <td>
+              <table>
+                {% for tf in tx.transfers %}
+                  <tr>
+                    <td>{{ tf.amount }}</td>
+                    <td>{{ tf.sender }}</td>
+                    <td>{{ tf.recipient }}</td>
+                  </tr>
+                  {% endfor %}
+              </table>
+            </td>
             <td>{{ tx.height }}</td>
+            <td>{{ tx.hash }}</td>
           </tr>
         {% endfor %}
         </table>

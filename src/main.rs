@@ -21,11 +21,20 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 // use std::path::{PathBuf, Path};
 
+#[derive(Default, Debug, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct Transfer {
+    sender: String,
+    recipient: String,
+    amount: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct Tx {
     hash: String,
     height: u64,
+    transfers: Vec<Transfer>
 }
 
 #[derive(Debug, Serialize)]
@@ -119,9 +128,14 @@ async fn write_to_file(address: &String, txs: &Vec<Tx>) -> Result<(), std::io::E
 
     let mut contents = String::new();
     
-    writeln!(contents,"#{0}",address);
+    writeln!(contents,"# searched for address: {0}",address).unwrap();
+    writeln!(contents,"amount,sender,recipient,hash,height").unwrap();
     for tx in txs.iter() {
-            writeln!(contents,"{0},{1}", tx.hash, tx.height);
+        for tf in tx.transfers.iter() {
+            writeln!(contents,"{0},{1},{2},{3},{4}",
+                tf.amount, tf.sender, tf.recipient,
+                tx.hash, tx.height).unwrap();
+        }
     }
 
     file.write_all(contents.as_bytes()).await?;
@@ -162,10 +176,7 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
 
             for tx in txs.txs.iter() {
                 count += 1;
-                result.push(Tx {
-                    hash: tx.hash.to_string(),
-                    height: tx.height.value(),
-                });
+                let mut transfers = Vec::new();
                 // writeln!(result,"Gas (used / wanted):\t{:?} / {:?}"
                 //     , tx.tx_result.gas_used
                 //     , tx.tx_result.gas_wanted)
@@ -173,12 +184,28 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
                 let events = &tx.tx_result.events;
                 for ev in events.iter() {
                     if ev.type_str == "transfer" {
-                        print!("\tEv:\t{:?}", ev.type_str);
+                        let mut transfer = Transfer::default();
+                        // print!("\tEv:\t{:?}", ev.type_str);
                         for attr in ev.attributes.iter() {
-                            println!("\t\t{:?}->{:?}", attr.key, attr.value);
+                            if attr.key.to_string() == "sender"{
+                                transfer.sender = attr.value.to_string();
+                            }
+                            else if attr.key.to_string() == "recipient"{
+                                transfer.recipient = attr.value.to_string();
+                            }
+                            else if attr.key.to_string() == "amount"{
+                                transfer.amount = attr.value.to_string();
+                            }
+                            // println!("\t\t{:?}->{:?}", attr.key, attr.value);
                         }
+                        transfers.push(transfer);
                     }
                 }
+                result.push(Tx {
+                    hash: tx.hash.to_string(),
+                    height: tx.height.value(),
+                    transfers
+                });
             }
 
             if txs.total_count == count {
