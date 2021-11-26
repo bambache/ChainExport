@@ -4,13 +4,13 @@ extern crate rocket;
 use std::fmt::Write;
 
 use rocket::form::Form;
+use rocket::fs::NamedFile;
 use rocket::fs::{relative, FileServer};
 use rocket::http::{ContentType, Status};
 use rocket::request::FlashMessage;
 use rocket::response::{Flash, Redirect};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::{fairing::AdHoc, State};
-use rocket::fs::NamedFile;
 use rocket_dyn_templates::Template;
 
 use tendermint_rpc::error::Error;
@@ -34,7 +34,7 @@ struct Transfer {
 struct Tx {
     hash: String,
     height: u64,
-    transfers: Vec<Transfer>
+    transfers: Vec<Transfer>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,10 +47,18 @@ struct Context {
 
 impl Context {
     pub fn err(flash: Option<(String, String)>) -> Context {
-        Context { flash, address: None, txs: vec![] }
+        Context {
+            flash,
+            address: None,
+            txs: vec![],
+        }
     }
     pub fn new(address: Option<String>, txs: Vec<Tx>) -> Context {
-        Context { flash: None,address, txs }
+        Context {
+            flash: None,
+            address,
+            txs,
+        }
     }
 }
 
@@ -106,8 +114,8 @@ async fn search(
         )),
         Some(chain) => match list_txs_for_address(&address, chain).await {
             Ok(v) => match write_to_file(&address, &v).await {
-                    Ok(_) => Ok(Template::render("index", Context::new(Some(address), v))),
-                    Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
+                Ok(_) => Ok(Template::render("index", Context::new(Some(address), v))),
+                Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
             },
             Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
         },
@@ -115,26 +123,28 @@ async fn search(
 }
 
 #[post("/export", data = "<hidden_address>")]
-async fn export( hidden_address: Form<Search>) -> Option<NamedFile> {
+async fn export(hidden_address: Form<Search>) -> Option<NamedFile> {
     let address = hidden_address.into_inner().address;
-    let file_name = format!("csv/{0}.csv",address);
+    let file_name = format!("csv/{0}.csv", address);
     NamedFile::open(file_name).await.ok()
 }
 
-
 async fn write_to_file(address: &String, txs: &Vec<Tx>) -> Result<(), std::io::Error> {
-    let file_name = format!("csv/{0}.csv",address);
+    let file_name = format!("csv/{0}.csv", address);
     let mut file = File::create(&file_name).await?;
 
     let mut contents = String::new();
-    
-    writeln!(contents,"# searched for address: {0}",address).unwrap();
-    writeln!(contents,"amount,sender,recipient,hash,height").unwrap();
+
+    writeln!(contents, "# searched for address: {0}", address).unwrap();
+    writeln!(contents, "amount,sender,recipient,hash,height").unwrap();
     for tx in txs.iter() {
         for tf in tx.transfers.iter() {
-            writeln!(contents,"{0},{1},{2},{3},{4}",
-                tf.amount, tf.sender, tf.recipient,
-                tx.hash, tx.height).unwrap();
+            writeln!(
+                contents,
+                "{0},{1},{2},{3},{4}",
+                tf.amount, tf.sender, tf.recipient, tx.hash, tx.height
+            )
+            .unwrap();
         }
     }
 
@@ -154,8 +164,8 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
     let client = HttpClient::new(&chain.api[0..])?;
     let mut result = Vec::new();
     let queries = vec![
-        Query::eq("transfer.sender", &address[0..]),
-        Query::eq("transfer.recipient", &address[0..]),
+        ("sender", Query::eq("transfer.sender", &address[0..])),
+        ("recipient", Query::eq("transfer.recipient", &address[0..])),
     ];
 
     let per_page = 10u8;
@@ -167,11 +177,11 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
             page += 1;
             print!(
                 "call tx_search with query {:}, page{:?}",
-                query.to_string(),
+                query.1.to_string(),
                 page
             );
             let txs = client
-                .tx_search(query.clone(), true, page, per_page, Order::Descending)
+                .tx_search(query.1.clone(), true, page, per_page, Order::Descending)
                 .await?;
 
             for tx in txs.txs.iter() {
@@ -184,27 +194,43 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
                 let events = &tx.tx_result.events;
                 for ev in events.iter() {
                     if ev.type_str == "transfer" {
-                        let mut transfer = Transfer::default();
                         // print!("\tEv:\t{:?}", ev.type_str);
+                        let mut transfer = Transfer::default();
+                        let mut push_transfer = true;
                         for attr in ev.attributes.iter() {
-                            if attr.key.to_string() == "sender"{
+                            // println!("\t\t{:?}->{:?}", attr.key, attr.value);
+                            if attr.key.to_string() == "sender" {
+                                // only keep transfer when we query the sender has the address
+                                // to avoid duplications
+                                if query.0 == "sender" && attr.value.to_string() != address.clone()
+                                {
+                                    push_transfer = false;
+                                    break;
+                                }
                                 transfer.sender = attr.value.to_string();
-                            }
-                            else if attr.key.to_string() == "recipient"{
+                            } else if attr.key.to_string() == "recipient" {
+                                // only keep transfer when we query the recipient has the address
+                                // to avoid duplications
+                                if query.0 == "recipient"
+                                    && attr.value.to_string() != address.clone()
+                                {
+                                    push_transfer = false;
+                                    break;
+                                }
                                 transfer.recipient = attr.value.to_string();
-                            }
-                            else if attr.key.to_string() == "amount"{
+                            } else if attr.key.to_string() == "amount" {
                                 transfer.amount = attr.value.to_string();
                             }
-                            // println!("\t\t{:?}->{:?}", attr.key, attr.value);
                         }
-                        transfers.push(transfer);
+                        if push_transfer {
+                            transfers.push(transfer);
+                        }
                     }
                 }
                 result.push(Tx {
                     hash: tx.hash.to_string(),
                     height: tx.height.value(),
-                    transfers
+                    transfers,
                 });
             }
 
