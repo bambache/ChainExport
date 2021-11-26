@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 rocket = "0.5.0-rc.1"
 tokio = "1.14.0"
+chrono = "0.4.19"
+multimap = "0.8.3"
+itertools = "0.10.1"
 
 [dependencies.tendermint-rpc]
 version = "0.23.0"

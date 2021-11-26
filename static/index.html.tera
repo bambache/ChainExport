@@ -18,11 +18,10 @@
     <p><!-- placeholder --></p>
 
     <div class="row">
-      <h4>Chain Export</h4>
+      <h2>Chain Export</h2>
       <form action="/address" method="post">
         <div class="ten columns">
-          <input type="text"
-            placeholder={% if address %} "{{address}}" {% else %} "enter an address..." {%endif%}
+          <input type="text" placeholder="enter an address..."
             name="address" id="address" value="" autofocus
             class="u-full-width {% if flash %}field-{{flash.0}}{% endif %}" />
           {% if flash %}
@@ -45,32 +44,37 @@
           <input type="submit" value="export to csv">
         </div>
       </form>
+      <h4>{{ address }}</h4>
+      <h4>Total: {{ amount}}</h4>
     </div>
-    {% endif %}
     
     <div class="row">
       <div class="twelve columns">
         <table>
-        {% for tx in txs %}
           <tr>
-            <td>
-              <table>
-                {% for tf in tx.transfers %}
-                  <tr>
-                    <td>{{ tf.amount }}</td>
-                    <td>{{ tf.sender }}</td>
-                    <td>{{ tf.recipient }}</td>
-                  </tr>
-                  {% endfor %}
-              </table>
-            </td>
+            <th>time</th>
+            <th>amount</th>
+            <th>sender</th>
+            <th>recipient</th>
+            <th>height</th>
+            <th>hash</th>
+          </tr>
+        {% for tx in txs %}
+          {% for tf in tx.transfers %}
+          <tr>
+            <td>{{ tx.time }}</td>
+            <td>{{ tf.amount }}</td>
+            <td>{{ tf.sender }}</td>
+            <td>{{ tf.recipient }}</td>
             <td>{{ tx.height }}</td>
             <td>{{ tx.hash }}</td>
           </tr>
+          {% endfor %}
         {% endfor %}
         </table>
       </div>
     </div>
+    {% endif %}
 
   </div>
 </body>

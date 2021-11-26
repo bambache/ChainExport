@@ -13,6 +13,10 @@ use rocket::serde::{Deserialize, Serialize};
 use rocket::{fairing::AdHoc, State};
 use rocket_dyn_templates::Template;
 
+use chrono::{DateTime, Utc};
+use itertools::Itertools;
+use multimap::MultiMap;
+
 use tendermint_rpc::error::Error;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order};
@@ -21,7 +25,9 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 // use std::path::{PathBuf, Path};
 
-#[derive(Default, Debug, Serialize)]
+type TxsCollection = MultiMap<DateTime<Utc>, Tx>;
+
+#[derive(Default, Debug, Clone, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct Transfer {
     sender: String,
@@ -29,11 +35,12 @@ struct Transfer {
     amount: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct Tx {
     hash: String,
     height: u64,
+    time: String,
     transfers: Vec<Transfer>,
 }
 
@@ -43,6 +50,7 @@ struct Context {
     flash: Option<(String, String)>,
     address: Option<String>,
     txs: Vec<Tx>,
+    amount: Option<String>,
 }
 
 impl Context {
@@ -51,13 +59,15 @@ impl Context {
             flash,
             address: None,
             txs: vec![],
+            amount: None,
         }
     }
-    pub fn new(address: Option<String>, txs: Vec<Tx>) -> Context {
+    pub fn new(address: Option<String>, amount: Option<String>, txs: Vec<Tx>) -> Context {
         Context {
             flash: None,
             address,
             txs,
+            amount,
         }
     }
 }
@@ -73,6 +83,7 @@ struct Chain {
     id: String,
     api: String,
     prefix: String,
+    denom: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -102,7 +113,7 @@ async fn search(
     config: &State<Chains>,
 ) -> Result<Template, Flash<Redirect>> {
     let address = search_form.into_inner().address;
-    println!("<{0}>", address);
+    // println!("<{0}>", address);
     if address.is_empty() {
         return Err(Flash::error(Redirect::to("/"), "Address cannot be empty."));
     }
@@ -113,8 +124,11 @@ async fn search(
             "Address prefix is not supported.",
         )),
         Some(chain) => match list_txs_for_address(&address, chain).await {
-            Ok(v) => match write_to_file(&address, &v).await {
-                Ok(_) => Ok(Template::render("index", Context::new(Some(address), v))),
+            Ok((vec, amount)) => match write_to_file(&address, &amount, &vec).await {
+                Ok(_) => Ok(Template::render(
+                    "index",
+                    Context::new(Some(address), Some(amount), vec),
+                )),
                 Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
             },
             Err(e) => Err(Flash::error(Redirect::to("/"), e.to_string())),
@@ -129,20 +143,25 @@ async fn export(hidden_address: Form<Search>) -> Option<NamedFile> {
     NamedFile::open(file_name).await.ok()
 }
 
-async fn write_to_file(address: &String, txs: &Vec<Tx>) -> Result<(), std::io::Error> {
+async fn write_to_file(address: &String, amount: &String, txs: &Vec<Tx>) -> Result<(), std::io::Error> {
     let file_name = format!("csv/{0}.csv", address);
     let mut file = File::create(&file_name).await?;
 
     let mut contents = String::new();
 
-    writeln!(contents, "# searched for address: {0}", address).unwrap();
-    writeln!(contents, "amount,sender,recipient,hash,height").unwrap();
+    writeln!(
+        contents,
+        "# searched for address: {0}, calculated total amount: {1}",
+        address, amount
+    )
+    .unwrap();
+    writeln!(contents, "datetime, amount,sender,recipient,hash,height").unwrap();
     for tx in txs.iter() {
         for tf in tx.transfers.iter() {
             writeln!(
                 contents,
-                "{0},{1},{2},{3},{4}",
-                tf.amount, tf.sender, tf.recipient, tx.hash, tx.height
+                "{0},{1},{2},{3},{4},{5}",
+                tx.time, tf.amount, tf.sender, tf.recipient, tx.hash, tx.height
             )
             .unwrap();
         }
@@ -154,7 +173,7 @@ async fn write_to_file(address: &String, txs: &Vec<Tx>) -> Result<(), std::io::E
     Ok(())
 }
 
-async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>, Error> {
+async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<(Vec<Tx>, String), Error> {
     // // TODO add unit tests for the following addresses
     // let query = Query::eq("transfer.sender", "ubik18dv926f68dtq32v54zrc5982q2wktgp5jevvft");
     // // let query = Query::eq("transfer.sender", "cosmos18dv926f68dtq32v54zrc5982q2wktgp5m07qf9");
@@ -162,30 +181,34 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
     // // let query = Query::eq("tx.height", 1090159);
 
     let client = HttpClient::new(&chain.api[0..])?;
-    let mut result = Vec::new();
+    let mut multi_map = TxsCollection::new();
     let queries = vec![
-        ("sender", Query::eq("transfer.sender", &address[0..])),
         ("recipient", Query::eq("transfer.recipient", &address[0..])),
+        ("sender", Query::eq("transfer.sender", &address[0..])),
     ];
 
     let per_page = 10u8;
+    let mut address_amount = 0u64;
 
     for query in queries.iter() {
         let mut count = 0u32;
         let mut page = 0u32;
         loop {
             page += 1;
-            print!(
-                "call tx_search with query {:}, page{:?}",
-                query.1.to_string(),
-                page
-            );
+            // print!(
+            //     "call tx_search with query {:}, page{:?}",
+            //     query.1.to_string(),
+            //     page
+            // );
             let txs = client
-                .tx_search(query.1.clone(), true, page, per_page, Order::Descending)
+                .tx_search(query.1.clone(), true, page, per_page, Order::Ascending)
                 .await?;
 
             for tx in txs.txs.iter() {
                 count += 1;
+
+                let block = client.block(tx.height).await?;
+
                 let mut transfers = Vec::new();
                 // writeln!(result,"Gas (used / wanted):\t{:?} / {:?}"
                 //     , tx.tx_result.gas_used
@@ -220,6 +243,23 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
                                 transfer.recipient = attr.value.to_string();
                             } else if attr.key.to_string() == "amount" {
                                 transfer.amount = attr.value.to_string();
+                                //TODO report parse errors
+                                match (&transfer.amount[0..]).strip_suffix(&chain.denom[0..]) {
+                                    Some(amount) => {
+                                        let numeric = amount.parse::<u64>().unwrap();
+                                        // println!(" {0} amount: {1}", query.0, address_amount);
+                                        // println!("parsed amount: {}", numeric);
+                                        if query.0 == "sender" {
+                                            address_amount -= numeric;
+                                        } else if query.0 == "recipient" {
+                                            address_amount += numeric;
+                                        }
+                                    }
+                                    None => println!(
+                                        "unrecognized suffix for amount {}",
+                                        transfer.amount
+                                    ),
+                                }
                             }
                         }
                         if push_transfer {
@@ -227,11 +267,21 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
                         }
                     }
                 }
-                result.push(Tx {
-                    hash: tx.hash.to_string(),
-                    height: tx.height.value(),
-                    transfers,
-                });
+                multi_map.insert(
+                    block.block.header.time.0,
+                    Tx {
+                        hash: tx.hash.to_string(),
+                        height: tx.height.value(),
+                        time: block
+                            .block
+                            .header
+                            .time
+                            .0
+                            .format("%Y-%b-%d %T %Z")
+                            .to_string(),
+                        transfers,
+                    },
+                );
             }
 
             if txs.total_count == count {
@@ -240,7 +290,15 @@ async fn list_txs_for_address(address: &String, chain: &Chain) -> Result<Vec<Tx>
         }
     }
 
-    Ok(result)
+    let mut result = Vec::new();
+
+    for key in multi_map.keys().sorted() {
+        for tx in multi_map.get_vec(key).unwrap() {
+            result.push(tx.clone());
+        }
+    }
+
+    Ok((result, format!("{0}{1}",address_amount,chain.denom)))
 }
 
 #[get("/rpc/<address>")]
@@ -270,6 +328,7 @@ fn chains(config: &State<Chains>) -> String {
         writeln!(result, "id:\t{}", chain.id).unwrap();
         writeln!(result, "api:\t{}", chain.api).unwrap();
         writeln!(result, "prefix:\t{}", chain.prefix).unwrap();
+        writeln!(result, "denom:\t{}", chain.denom).unwrap();
     }
     result
 }
